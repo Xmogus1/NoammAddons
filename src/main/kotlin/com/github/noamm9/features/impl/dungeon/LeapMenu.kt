@@ -44,6 +44,7 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
     private val mapLeap by ToggleSetting("Map Leap", false).withDescription("Click a teammate on the dungeon map to leap to them.").showIf { customLeapMenu.value && DungeonMap.enabled && MapConfig.mapEnabled.value }
     private val mapLeapAfterBlood by ToggleSetting("After Blood Only", false).withDescription("Use the regular leap menu until the Blood opens, then switch to Map Leap.").showIf { customLeapMenu.value && mapLeap.value }
     private val mapLeapScale by SliderSetting("Map Leap Scale", 1.5f, 0.5f, 3f, 0.1f).showIf { customLeapMenu.value && mapLeap.value }
+    private val mapLeapShowMenu by ToggleSetting("Show Leap Menu", false).withDescription("Shows leap buttons below the map").showIf { customLeapMenu.value && mapLeap.value }
     val sorting by DropdownSetting("Leap Order", 0, arrayListOf("A-Z Class", "A-Z Name", "Odin Sorting", "Custom sorting", "No Sorting")).withDescription("How to sort the leap menu. /na leaporder to configure custom sorting.")
     private val customLeapOrderSetting by ListSetting<String>("Custom Leap Order").hidden()
     private val customLeapTypeSetting by TextInputSetting("Custom Leap Type", "name").hidden()
@@ -62,6 +63,7 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
 
     val players = Array<LeapMenuPlayer?>(4) { null }
     private var mapLeapHoveredIndex: Int? = null
+    private var menuBelowHoveredIndex: Int? = null
     private var clicked = false
 
     private val boxBg = Color(33, 33, 33)
@@ -205,7 +207,7 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
                 return@register
             }
 
-            val i = (if (mapLeapEnabled && ! LocationUtils.inBoss) mapLeapHoveredIndex else getHoveredIndex()) ?: return@register
+            val i = (if (mapLeapEnabled && ! LocationUtils.inBoss) (mapLeapHoveredIndex ?: menuBelowHoveredIndex) else getHoveredIndex()) ?: return@register
             event.isCanceled = true
             triggerLeap(i)
         }
@@ -323,8 +325,17 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
         val scale = mapLeapScale.value
         val mapPix = mapSize * scale
 
+        val showMenu = mapLeapShowMenu.value
+        val gap = 5f
+        val menuW = (mapPix * 2f).coerceAtMost(sw * 0.95f)
+        val menuOx = (sw - menuW) / 2f
+        val btnW = (menuW - gap) / 2f
+        val btnH = (mapPix * 0.3f).coerceIn(42f, 72f)
+        val topGap = 8f
+        val menuH = if (showMenu) topGap + (btnH * 2f) + gap else 0f
+
         val mapOx = (sw - mapPix) / 2f
-        val mapOy = (sh - mapPix - (8 * scale)) / 2f
+        val mapOy = (sh - mapPix - menuH - (8 * scale)) / 2f
 
         fun playerDot(player: DungeonPlayer): Triple<Float, Float, Float> {
             val (pmx, pmz) = teammateMapPos(player)
@@ -332,6 +343,7 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
         }
 
         mapLeapHoveredIndex = null
+        menuBelowHoveredIndex = null
 
         players.forEachIndexed { i, entry ->
             if (entry == null || entry.player.isDead) return@forEachIndexed
@@ -352,6 +364,38 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
             players[idx]?.let { entry ->
                 val (px, py, r) = playerDot(entry.player)
                 ctx.drawBorder(px - r, py - r, r * 2f, r * 2f, thickness = 2)
+            }
+        }
+
+        if (showMenu) {
+            val headSize = (btnH - 12f).toInt().coerceAtLeast(14)
+            val top = mapOy + mapPix + topGap
+
+            val btnOffsets = listOf(
+                menuOx to top,
+                (menuOx + btnW + gap) to top,
+                menuOx to (top + btnH + gap),
+                (menuOx + btnW + gap) to (top + btnH + gap)
+            )
+
+            players.forEachIndexed { i, entry ->
+                if (entry == null) return@forEachIndexed
+                val (bx, by) = btnOffsets[i]
+                val hovered = mx in bx .. (bx + btnW) && my in by .. (by + btnH)
+                if (hovered) menuBelowHoveredIndex = i
+
+                ctx.drawFloatingRect(bx, by, btnW, btnH, leapBoxColor(entry.player, hovered).withAlpha(210))
+
+                val hx = (bx + 5f).toInt()
+                val hy = (by + (btnH - headSize) / 2f).toInt()
+                ctx.drawPlayerHead(hx, hy, headSize, entry.player.skin)
+                ctx.drawBorder(hx, hy, headSize, headSize, entry.player.clazz.color)
+
+                val nameScale = 1.8f
+                val tx = hx + headSize + 5
+                val ty = (by + btnH / 2f - (UGraphics.getFontHeight() * nameScale) / 2f).toInt()
+                val label = if (entry.player.isDead) "§cDEAD" else entry.player.name
+                ctx.drawString(label, tx, ty, entry.player.clazz.color, scale = nameScale)
             }
         }
 
