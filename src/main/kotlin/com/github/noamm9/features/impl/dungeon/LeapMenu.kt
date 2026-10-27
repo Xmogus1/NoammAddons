@@ -44,6 +44,7 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
     private val mapLeap by ToggleSetting("Map Leap", false).withDescription("Click a teammate on the dungeon map to leap to them.").showIf { customLeapMenu.value && DungeonMap.enabled && MapConfig.mapEnabled.value }
     private val mapLeapAfterBlood by ToggleSetting("After Blood Only", false).withDescription("Use the regular leap menu until the Blood opens, then switch to Map Leap.").showIf { customLeapMenu.value && mapLeap.value }
     private val mapLeapScale by SliderSetting("Map Leap Scale", 1.5f, 0.5f, 3f, 0.1f).showIf { customLeapMenu.value && mapLeap.value }
+    private val mapLeapShowMenu by ToggleSetting("Show Leap Menu", false).withDescription("Shows leap buttons below the map").showIf { customLeapMenu.value && mapLeap.value }
     val sorting by DropdownSetting("Leap Order", 0, arrayListOf("A-Z Class", "A-Z Name", "Odin Sorting", "Custom sorting", "No Sorting")).withDescription("How to sort the leap menu. /na leaporder to configure custom sorting.")
     private val customLeapOrderSetting by ListSetting<String>("Custom Leap Order").hidden()
     private val customLeapTypeSetting by TextInputSetting("Custom Leap Type", "name").hidden()
@@ -62,6 +63,7 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
 
     val players = Array<LeapMenuPlayer?>(4) { null }
     private var mapLeapHoveredIndex: Int? = null
+    private var menuBelowHoveredIndex: Int? = null
     private var clicked = false
 
     private val boxBg = Color(33, 33, 33)
@@ -137,8 +139,14 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
 
             if (mapLeapEnabled && ! LocationUtils.inBoss) {
                 renderMapLeap(event.context, event.mouseX, event.mouseY)
-                return@register
+                if (! mapLeapShowMenu.value) {
+                    menuBelowHoveredIndex = null
+                    return@register
+                }
             }
+            else menuBelowHoveredIndex = null
+
+            val showBelow = mapLeapEnabled && mapLeapShowMenu.value && ! LocationUtils.inBoss
 
             Resolution.push(event.context)
             val userScale = (scale.value.toFloat() / 100f) * 2.0f
@@ -157,7 +165,13 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
             val gridW = (boxWidth * 2) + padding
             val gridH = (boxHeight * 2) + padding
             val startX = (screenWidth - gridW) / 2f
-            val startY = (screenHeight - gridH) / 2f
+            val startY = if (showBelow) {
+                val mlScale = mapLeapScale.value
+                val mapPixRes = 128f * mlScale
+                val mapBottomRes = (Resolution.height - mapPixRes - 8f * mlScale) / 2f + mapPixRes
+                (mapBottomRes / userScale) + 8f
+            }
+            else (screenHeight - gridH) / 2f
 
             val offsets = listOf(
                 startX to startY,
@@ -166,7 +180,15 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
                 (startX + boxWidth + padding) to (startY + boxHeight + padding)
             )
 
-            val hoveredIndex = getHoveredIndex()
+            val hoveredIndex = if (showBelow) {
+                val gmx = Resolution.getMouseX(event.mouseX).toFloat() / userScale
+                val gmy = Resolution.getMouseY(event.mouseY).toFloat() / userScale
+                val idx = offsets.indexOfFirst { (ox, oy) -> gmx in ox .. (ox + boxWidth) && gmy in oy .. (oy + boxHeight) }
+                    .takeIf { it in players.indices && players[it] != null }
+                menuBelowHoveredIndex = idx
+                idx
+            }
+            else getHoveredIndex()
 
             players.forEachIndexed { i, entry ->
                 if (entry == null) return@forEachIndexed
@@ -205,7 +227,7 @@ object LeapMenu: Feature("Custom Leap Menu and leap message"), ICustomMenu {
                 return@register
             }
 
-            val i = (if (mapLeapEnabled && ! LocationUtils.inBoss) mapLeapHoveredIndex else getHoveredIndex()) ?: return@register
+            val i = (if (mapLeapEnabled && ! LocationUtils.inBoss) (mapLeapHoveredIndex ?: menuBelowHoveredIndex) else getHoveredIndex()) ?: return@register
             event.isCanceled = true
             triggerLeap(i)
         }
